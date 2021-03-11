@@ -1,0 +1,146 @@
+import newspaper
+from newspaper import Article
+import nltk
+import csv
+from datetime import date
+import spacy
+import pandas as pd
+import os
+
+nltk.download('punkt')
+
+
+today = date.today()
+d2 = today.strftime("%B %d, %Y")
+extraction_date = today.strftime("%B %d, %Y")
+
+with open("News Update for " + today.strftime("%B %d, %Y" + ".csv"), 'w', encoding='utf-8-sig', newline='') as file:
+    writer = csv.writer(file)
+    writer.writerow(["Title", "Summary","Keywords", "Summary Topics",  "Url", "Publishdate", "ExtractionDate"])
+
+
+article_list = []
+corpus = []
+
+named_entities = []
+temp_entity_name = ''
+temp_named_entity = None
+
+news_repo = [
+    'https://www.manifoldtimes.com',
+    ]
+
+
+news_repo_real = [
+    'https://www.manifoldtimes.com',
+    'https://www.marineinsight.com',
+    'https://www.maritime-executive.com',
+    'http://www.bunkerworld.com/',
+    'https://shipandbunker.com/news',
+    'https://splash247.com',
+    'https://www.bunkerspot.com/latest-news',
+    'https://theloadstar.com/category/news/',
+    "https://smartmaritimenetwork.com/category/news/",
+    "https://www.seatrade-maritime.com",
+    "https://theloadstar.com/category/news/",
+    "https://gcaptain.com",
+    "https://www.freightwaves.com/american-shipper",
+    "https://jpt.spe.org/latest-news",
+    "https://unctad.org/publications",
+    "https://www.bimco.org/news-and-trends/priority-news",
+    "https://iumi.com/news/news",
+    "https://cmacgm-group.com/en/news-medias",
+    "https://iumi.com/news/news",
+    "https://www.imo.org/en/MediaCentre/Pages/default.aspx",
+    "https://www.amsa.gov.au/news-community/news-and-media-releases",
+    "https://namepa.net/news/",
+    'https://www.worldoil.com',
+    "https://www.tradewindsnews.com/news",
+]
+
+for repo in news_repo:
+    scrape_article_links = newspaper.build(repo, memoize_articles=False)
+
+    for article in scrape_article_links.articles:
+
+        article_list.append(article.url)
+        print(repo)
+
+
+print(article_list)
+print(scrape_article_links.size())
+
+
+#now we use article features in newspaper to extract what we need
+
+for x in article_list:
+    try:
+        article_parse = Article(x)
+    except Exception:
+        pass
+
+    try:
+        article_parse.download()
+    except Exception:
+        pass
+
+    try:
+        article_parse.parse()
+    except Exception:
+        pass
+
+    try:
+        article_parse.nlp()
+    except Exception:
+        pass
+
+    url = x
+    title = article_parse.title
+    author = article_parse.authors
+    summary = article_parse.summary
+    keywords = article_parse.keywords
+    publishdate = article_parse.publish_date
+
+    nlp = spacy.load('en_core_web_sm')
+    summary_nlp = nlp(summary)
+    summary_nlp_topics = [(word, word.ent_type_) for word in summary_nlp if word.ent_type_]
+    corpus.append(summary_nlp_topics)
+
+    write_entity_to_csv = []
+    for word in summary_nlp:
+        term = word.text
+        tag = word.ent_type_
+        if tag:
+            temp_entity_name = ' '.join([temp_entity_name, term]).strip()
+            temp_named_entity = (temp_entity_name, tag)
+        else:
+            if temp_named_entity:
+                named_entities.append(temp_named_entity)
+                write_entity_to_csv.append(temp_named_entity)
+                temp_entity_name = ''
+                temp_named_entity = None
+
+
+    with open("News Update for " + today.strftime("%B %d, %Y"+".csv"), 'a', encoding='utf-8-sig', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow([title, summary, keywords, write_entity_to_csv, url, publishdate, extraction_date])
+
+    print(x)
+
+
+entity_frame = pd.DataFrame(named_entities,
+                                columns=['Entity Name', 'Entity Type'])
+
+top_entities = (entity_frame.groupby(by=['Entity Name', 'Entity Type'])
+                .size()
+                .sort_values(ascending=False)
+                .reset_index().rename(columns={0: 'Frequency'}))
+
+top_entities["Date"] = extraction_date
+top_entities = top_entities[~top_entities['Entity Type'].str.contains('ORDINAL')]
+top_entities = top_entities[~top_entities['Entity Type'].str.contains('DATE')]
+top_entities = top_entities[~top_entities['Entity Type'].str.contains('CARDINAL')]
+
+#export
+file_name = "Trending Topics for " + today.strftime("%B %d, %Y"+".csv")
+export = top_entities.to_csv(file_name, encoding='utf-8-sig')
